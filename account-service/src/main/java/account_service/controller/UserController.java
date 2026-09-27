@@ -2,6 +2,7 @@ package account_service.controller;
 
 import account_service.dto.ApiResponse;
 import account_service.dto.UpdateProfileRequest;
+import account_service.dto.UpdateStatusRequest;
 import account_service.dto.UserResponse;
 import account_service.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,8 +12,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -63,6 +66,16 @@ public class UserController {
         validateUserAccess(id, authentication);
         UserResponse response = userService.updateUserProfile(id, request);
         return ResponseEntity.ok(ApiResponse.success("User profile updated successfully", response));
+    }
+
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Update user status (Admin only)", description = "Updates user status to ACTIVE, SUSPENDED, or DEACTIVATED. Requires ADMIN role.")
+    public ResponseEntity<ApiResponse<UserResponse>> updateUserStatus(
+            @PathVariable String id,
+            @Valid @RequestBody UpdateStatusRequest request) {
+        UserResponse response = userService.updateUserStatus(id, request.getStatus());
+        return ResponseEntity.ok(ApiResponse.success("User status updated successfully", response));
     }
 
     private void validateUserAccess(String targetUserId, Authentication authentication) {

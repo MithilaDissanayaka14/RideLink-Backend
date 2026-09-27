@@ -4,6 +4,7 @@ import account_service.dto.UpdateProfileRequest;
 import account_service.dto.UserResponse;
 import account_service.exception.UserNotFoundException;
 import account_service.model.User;
+import account_service.model.UserStatus;
 import account_service.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,18 @@ public class UserService {
 
         user.setFullName(request.getFullName().trim());
         user.setPhoneNumber(request.getPhoneNumber().trim());
+        user.setUpdatedAt(LocalDateTime.now());
+
+        User updatedUser = userRepository.save(user);
+
+        return mapToUserResponse(updatedUser);
+    }
+
+    public UserResponse updateUserStatus(String userId, UserStatus newStatus) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException("User not found with id: " + userId));
+
+        user.setStatus(newStatus);
         user.setUpdatedAt(LocalDateTime.now());
 
         User updatedUser = userRepository.save(user);

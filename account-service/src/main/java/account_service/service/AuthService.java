@@ -38,6 +38,10 @@ public class AuthService {
             throw new AccountSuspendedException("Account is suspended. Please contact support.");
         }
 
+        if (user.getStatus() == UserStatus.DEACTIVATED) {
+            throw new AccountSuspendedException("Account is deactivated. Please contact support.");
+        }
+
         String token = jwtTokenProvider.generateToken(user);
 
         return LoginResponse.builder()

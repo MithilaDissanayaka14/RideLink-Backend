@@ -1,6 +1,8 @@
 package account_service.controller;
 
 import account_service.dto.ApiResponse;
+import account_service.dto.LoginRequest;
+import account_service.dto.LoginResponse;
 import account_service.dto.RegisterRequest;
 import account_service.dto.UserResponse;
 import account_service.service.AuthService;
@@ -29,5 +31,12 @@ public class AuthController {
         UserResponse response = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("User registered successfully", response));
+    }
+
+    @PostMapping("/login")
+    @Operation(summary = "User login", description = "Authenticates user credentials and issues a signed JWT token containing userId, email, and role")
+    public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
+        LoginResponse response = authService.login(request);
+        return ResponseEntity.ok(ApiResponse.success("Authentication successful", response));
     }
 }

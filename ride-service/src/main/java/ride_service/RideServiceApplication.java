@@ -54,7 +54,10 @@ public class RideServiceApplication {
 	}
 
 	private static void configureDatabase() {
-		String mongoUri = System.getProperty("MONGODB_URI");
+		String mongoUri = System.getProperty("MONGO_URI");
+		if (mongoUri == null || mongoUri.isBlank()) {
+			mongoUri = System.getProperty("MONGODB_URI");
+		}
 		boolean useInMemory = "true".equalsIgnoreCase(System.getProperty("USE_IN_MEMORY_MONGO", "false"));
 
 		if (!useInMemory && mongoUri != null && !mongoUri.isBlank()) {

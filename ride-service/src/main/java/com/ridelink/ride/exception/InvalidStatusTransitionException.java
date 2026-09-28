@@ -16,7 +16,7 @@ public class InvalidStatusTransitionException extends RuntimeException {
     }
 
     public InvalidStatusTransitionException(RideStatus currentStatus, RideStatus targetStatus) {
-        super(String.format("Cannot transition ride from %s to %s", currentStatus, targetStatus));
+        super(String.format("Invalid ride status transition: Cannot transition ride from %s to %s", currentStatus, targetStatus));
         this.currentStatus = currentStatus;
         this.targetStatus = targetStatus;
     }

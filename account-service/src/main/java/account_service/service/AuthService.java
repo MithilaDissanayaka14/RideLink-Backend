@@ -34,12 +34,8 @@ public class AuthService {
             throw new InvalidCredentialsException("Invalid email or password");
         }
 
-        if (user.getStatus() == UserStatus.SUSPENDED) {
-            throw new AccountSuspendedException("Account is suspended. Please contact support.");
-        }
-
-        if (user.getStatus() == UserStatus.DEACTIVATED) {
-            throw new AccountSuspendedException("Account is deactivated. Please contact support.");
+        if (user.getStatus() == UserStatus.SUSPENDED || user.getStatus() == UserStatus.DEACTIVATED) {
+            throw new AccountSuspendedException("Account is inactive or suspended");
         }
 
         String token = jwtTokenProvider.generateToken(user);

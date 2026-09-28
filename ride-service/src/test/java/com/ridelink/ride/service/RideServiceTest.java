@@ -1,5 +1,6 @@
 package com.ridelink.ride.service;
 
+import com.ridelink.ride.client.AccountServiceClient;
 import com.ridelink.ride.client.DriverServiceClient;
 import com.ridelink.ride.client.FareServiceClient;
 import com.ridelink.ride.dto.CreateRideRequest;
@@ -8,6 +9,7 @@ import com.ridelink.ride.dto.FareEstimateRequest;
 import com.ridelink.ride.dto.FareEstimateResponse;
 import com.ridelink.ride.dto.RideResponse;
 import com.ridelink.ride.dto.UpdateRideStatusRequest;
+import com.ridelink.ride.dto.UserResponse;
 import com.ridelink.ride.exception.InvalidStatusTransitionException;
 import com.ridelink.ride.exception.NoDriversAvailableException;
 import com.ridelink.ride.exception.RideNotFoundException;
@@ -45,6 +47,9 @@ class RideServiceTest {
     @Mock
     private DriverServiceClient driverServiceClient;
 
+    @Mock
+    private AccountServiceClient accountServiceClient;
+
     @InjectMocks
     private RideService rideService;
 
@@ -52,6 +57,7 @@ class RideServiceTest {
     private Location destination;
     private CreateRideRequest createRideRequest;
     private Ride sampleRide;
+    private UserResponse validPassengerUser;
 
     @BeforeEach
     void setUp() {
@@ -85,6 +91,13 @@ class RideServiceTest {
                 .createdAt(Instant.now())
                 .updatedAt(Instant.now())
                 .build();
+
+        validPassengerUser = UserResponse.builder()
+                .id("passenger-101")
+                .email("passenger@ridelink.com")
+                .role("PASSENGER")
+                .status("ACTIVE")
+                .build();
     }
 
     // ==========================================
@@ -92,7 +105,7 @@ class RideServiceTest {
     // ==========================================
 
     @Test
-    @DisplayName("Success Scenario: Creating a ride successfully when fare estimate succeeds and drivers are available")
+    @DisplayName("Success Scenario: Creating a ride successfully when passenger is valid, fare estimate succeeds and drivers are available")
     void createRide_Success_WhenDriversAvailableAndFareEstimateSucceeds() {
         // Arrange
         FareEstimateResponse fareResponse = FareEstimateResponse.builder()
@@ -106,6 +119,7 @@ class RideServiceTest {
                 .isAvailable(true)
                 .build();
 
+        when(accountServiceClient.getUserById("passenger-101")).thenReturn(validPassengerUser);
         when(fareServiceClient.estimateFare(any(FareEstimateRequest.class))).thenReturn(fareResponse);
         when(driverServiceClient.getAvailableDrivers(anyDouble(), anyDouble())).thenReturn(List.of(availableDriver));
         when(rideRepository.save(any(Ride.class))).thenReturn(sampleRide);
@@ -121,13 +135,84 @@ class RideServiceTest {
         assertEquals(15.75, response.getEstimatedFare());
         assertEquals(5.5, response.getDistanceKm());
 
+        verify(accountServiceClient, times(1)).getUserById("passenger-101");
         verify(fareServiceClient, times(1)).estimateFare(any(FareEstimateRequest.class));
         verify(driverServiceClient, times(1)).getAvailableDrivers(37.7749, -122.4194);
         verify(rideRepository, times(1)).save(any(Ride.class));
     }
 
     // ==========================================
-    // 2. LIFECYCLE TRANSITION SCENARIOS
+    // 2. PASSENGER & COORDINATE VALIDATION TESTS
+    // ==========================================
+
+    @Test
+    @DisplayName("Validation Test: Rejects ride creation when user role is not PASSENGER")
+    void createRide_ThrowsIllegalArgumentException_WhenUserNotPassenger() {
+        UserResponse driverUser = UserResponse.builder()
+                .id("passenger-101")
+                .role("DRIVER")
+                .build();
+        when(accountServiceClient.getUserById("passenger-101")).thenReturn(driverUser);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                rideService.createRide(createRideRequest)
+        );
+
+        assertEquals("Only users registered as PASSENGER can request a ride", ex.getMessage());
+        verify(rideRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Validation Test: Rejects ride creation when passenger not found")
+    void createRide_ThrowsIllegalArgumentException_WhenPassengerNotFound() {
+        when(accountServiceClient.getUserById("passenger-101")).thenReturn(null);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                rideService.createRide(createRideRequest)
+        );
+
+        assertEquals("Only users registered as PASSENGER can request a ride", ex.getMessage());
+        verify(rideRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Validation Test: Rejects invalid latitude or longitude coordinates")
+    void createRide_ThrowsIllegalArgumentException_WhenCoordinatesInvalid() {
+        when(accountServiceClient.getUserById("passenger-101")).thenReturn(validPassengerUser);
+
+        createRideRequest.getPickupLocation().setLatitude(95.0); // Invalid lat > 90
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                rideService.createRide(createRideRequest)
+        );
+
+        assertTrue(ex.getMessage().contains("latitude must be between -90 and 90"));
+
+        createRideRequest.getPickupLocation().setLatitude(37.7749);
+        createRideRequest.getDestinationLocation().setLongitude(-190.0); // Invalid lng < -180
+
+        ex = assertThrows(IllegalArgumentException.class, () ->
+                rideService.createRide(createRideRequest)
+        );
+
+        assertTrue(ex.getMessage().contains("longitude must be between -180 and 180"));
+    }
+
+    @Test
+    @DisplayName("Validation Test: Rejects non-positive distance")
+    void createRide_ThrowsIllegalArgumentException_WhenDistanceNonPositive() {
+        when(accountServiceClient.getUserById("passenger-101")).thenReturn(validPassengerUser);
+        createRideRequest.setDistanceKm(0.0);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
+                rideService.createRide(createRideRequest)
+        );
+
+        assertTrue(ex.getMessage().contains("Distance must be greater than zero"));
+    }
+
+    // ==========================================
+    // 3. LIFECYCLE TRANSITION SCENARIOS
     // ==========================================
 
     @Test
@@ -241,9 +326,9 @@ class RideServiceTest {
     }
 
     @Test
-    @DisplayName("Lifecycle Transition: Transitioning status to CANCELLED from state prior to completed")
-    void updateRideStatus_Success_CancellationPriorToCompleted() {
-        // Arrange
+    @DisplayName("Lifecycle Transition: Transitioning status to CANCELLED from REQUESTED, ASSIGNED, or ACCEPTED")
+    void updateRideStatus_Success_CancellationPriorToInProgress() {
+        // REQUESTED -> CANCELLED
         sampleRide.setStatus(RideStatus.REQUESTED);
         when(rideRepository.findById("ride-1001")).thenReturn(Optional.of(sampleRide));
         when(rideRepository.save(any(Ride.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -253,17 +338,24 @@ class RideServiceTest {
                 .reason("Changed plans")
                 .build();
 
-        // Act
         RideResponse response = rideService.updateRideStatus("ride-1001", cancelRequest);
-
-        // Assert
         assertNotNull(response);
         assertEquals(RideStatus.CANCELLED, response.getStatus());
         assertEquals("Changed plans", response.getCancellationReason());
+
+        // ASSIGNED -> CANCELLED
+        sampleRide.setStatus(RideStatus.ASSIGNED);
+        RideResponse assignedCancel = rideService.updateRideStatus("ride-1001", cancelRequest);
+        assertEquals(RideStatus.CANCELLED, assignedCancel.getStatus());
+
+        // ACCEPTED -> CANCELLED
+        sampleRide.setStatus(RideStatus.ACCEPTED);
+        RideResponse acceptedCancel = rideService.updateRideStatus("ride-1001", cancelRequest);
+        assertEquals(RideStatus.CANCELLED, acceptedCancel.getStatus());
     }
 
     // ==========================================
-    // 3. NEGATIVE SCENARIO 1: NO DRIVERS AVAILABLE
+    // 4. NEGATIVE SCENARIOS
     // ==========================================
 
     @Test
@@ -274,8 +366,8 @@ class RideServiceTest {
                 .estimatedFare(15.75)
                 .build();
 
+        when(accountServiceClient.getUserById("passenger-101")).thenReturn(validPassengerUser);
         when(fareServiceClient.estimateFare(any(FareEstimateRequest.class))).thenReturn(fareResponse);
-        // Driver service returns empty list
         when(driverServiceClient.getAvailableDrivers(anyDouble(), anyDouble())).thenReturn(Collections.emptyList());
 
         // Act & Assert
@@ -291,27 +383,21 @@ class RideServiceTest {
     @Test
     @DisplayName("Negative Scenario 1 (Variant): Attempting to create a ride when DriverServiceClient returns null")
     void createRide_ThrowsNoDriversAvailableException_WhenDriversListIsNull() {
-        // Arrange
         FareEstimateResponse fareResponse = FareEstimateResponse.builder()
                 .estimatedFare(15.75)
                 .build();
 
+        when(accountServiceClient.getUserById("passenger-101")).thenReturn(validPassengerUser);
         when(fareServiceClient.estimateFare(any(FareEstimateRequest.class))).thenReturn(fareResponse);
         when(driverServiceClient.getAvailableDrivers(anyDouble(), anyDouble())).thenReturn(null);
 
-        // Act & Assert
         assertThrows(NoDriversAvailableException.class, () -> rideService.createRide(createRideRequest));
         verify(rideRepository, never()).save(any(Ride.class));
     }
 
-    // ==========================================
-    // 4. NEGATIVE SCENARIO 2: INVALID STATUS JUMP
-    // ==========================================
-
     @Test
     @DisplayName("Negative Scenario 2: Attempting an invalid status jump (e.g., REQUESTED directly to COMPLETED), verifying InvalidStatusTransitionException is thrown")
     void updateRideStatus_ThrowsInvalidStatusTransitionException_WhenDirectJumpToCompletedAttempted() {
-        // Arrange
         sampleRide.setStatus(RideStatus.REQUESTED);
         when(rideRepository.findById("ride-1001")).thenReturn(Optional.of(sampleRide));
 
@@ -319,13 +405,13 @@ class RideServiceTest {
                 .status(RideStatus.COMPLETED)
                 .build();
 
-        // Act & Assert
         InvalidStatusTransitionException exception = assertThrows(
                 InvalidStatusTransitionException.class,
                 () -> rideService.updateRideStatus("ride-1001", invalidRequest)
         );
 
-        assertEquals("Cannot transition ride from REQUESTED to COMPLETED", exception.getMessage());
+        assertTrue(exception.getMessage().contains("Invalid ride status transition"));
+        assertTrue(exception.getMessage().contains("Cannot transition ride from REQUESTED to COMPLETED"));
         assertEquals(RideStatus.REQUESTED, exception.getCurrentStatus());
         assertEquals(RideStatus.COMPLETED, exception.getTargetStatus());
 
@@ -335,24 +421,41 @@ class RideServiceTest {
     @Test
     @DisplayName("Negative Scenario 2 (Variant): Attempting to assign a driver when ride is not in REQUESTED status")
     void assignDriver_ThrowsInvalidStatusTransitionException_WhenCurrentStatusIsNotRequested() {
-        // Arrange
         sampleRide.setStatus(RideStatus.IN_PROGRESS);
         when(rideRepository.findById("ride-1001")).thenReturn(Optional.of(sampleRide));
 
-        // Act & Assert
         InvalidStatusTransitionException exception = assertThrows(
                 InvalidStatusTransitionException.class,
                 () -> rideService.assignDriver("ride-1001", "driver-201")
         );
 
-        assertEquals("Cannot transition ride from IN_PROGRESS to ASSIGNED", exception.getMessage());
+        assertTrue(exception.getMessage().contains("Invalid ride status transition"));
+        assertTrue(exception.getMessage().contains("Cannot transition ride from IN_PROGRESS to ASSIGNED"));
         verify(rideRepository, never()).save(any(Ride.class));
     }
 
     @Test
-    @DisplayName("Negative Scenario 2 (Variant): Attempting to cancel a ride after it is already COMPLETED")
-    void updateRideStatus_ThrowsInvalidStatusTransitionException_WhenCancellingAlreadyCompletedRide() {
-        // Arrange
+    @DisplayName("Negative Scenario 2 (Variant): Attempting to cancel an IN_PROGRESS ride (only COMPLETED allowed)")
+    void updateRideStatus_ThrowsInvalidStatusTransitionException_WhenCancellingInProgressRide() {
+        sampleRide.setStatus(RideStatus.IN_PROGRESS);
+        when(rideRepository.findById("ride-1001")).thenReturn(Optional.of(sampleRide));
+
+        UpdateRideStatusRequest cancelRequest = UpdateRideStatusRequest.builder()
+                .status(RideStatus.CANCELLED)
+                .build();
+
+        InvalidStatusTransitionException exception = assertThrows(
+                InvalidStatusTransitionException.class,
+                () -> rideService.updateRideStatus("ride-1001", cancelRequest)
+        );
+
+        assertTrue(exception.getMessage().contains("Invalid ride status transition"));
+        verify(rideRepository, never()).save(any(Ride.class));
+    }
+
+    @Test
+    @DisplayName("Negative Scenario 2 (Variant): Terminal state - Attempting transition from COMPLETED")
+    void updateRideStatus_ThrowsInvalidStatusTransitionException_WhenTransitionFromCompleted() {
         sampleRide.setStatus(RideStatus.COMPLETED);
         when(rideRepository.findById("ride-1001")).thenReturn(Optional.of(sampleRide));
 
@@ -361,13 +464,32 @@ class RideServiceTest {
                 .reason("Customer disputed")
                 .build();
 
-        // Act & Assert
         InvalidStatusTransitionException exception = assertThrows(
                 InvalidStatusTransitionException.class,
                 () -> rideService.updateRideStatus("ride-1001", cancelRequest)
         );
 
-        assertEquals("Cannot transition ride from COMPLETED to CANCELLED", exception.getMessage());
+        assertTrue(exception.getMessage().contains("Invalid ride status transition"));
+        assertTrue(exception.getMessage().contains("Cannot transition ride from COMPLETED to CANCELLED"));
+        verify(rideRepository, never()).save(any(Ride.class));
+    }
+
+    @Test
+    @DisplayName("Negative Scenario 2 (Variant): Terminal state - Attempting transition from CANCELLED")
+    void updateRideStatus_ThrowsInvalidStatusTransitionException_WhenTransitionFromCancelled() {
+        sampleRide.setStatus(RideStatus.CANCELLED);
+        when(rideRepository.findById("ride-1001")).thenReturn(Optional.of(sampleRide));
+
+        UpdateRideStatusRequest req = UpdateRideStatusRequest.builder()
+                .status(RideStatus.ASSIGNED)
+                .build();
+
+        InvalidStatusTransitionException exception = assertThrows(
+                InvalidStatusTransitionException.class,
+                () -> rideService.updateRideStatus("ride-1001", req)
+        );
+
+        assertTrue(exception.getMessage().contains("Invalid ride status transition"));
         verify(rideRepository, never()).save(any(Ride.class));
     }
 

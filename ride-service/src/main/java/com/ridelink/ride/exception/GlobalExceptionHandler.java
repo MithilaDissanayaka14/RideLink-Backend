@@ -82,12 +82,12 @@ public class GlobalExceptionHandler {
         log.warn("Invalid status transition: {}", ex.getMessage());
 
         String message;
-        if (ex.getCurrentStatus() != null && ex.getTargetStatus() != null) {
-            message = String.format("Cannot transition ride from %s to %s", ex.getCurrentStatus(), ex.getTargetStatus());
-        } else if (ex.getMessage() != null && !ex.getMessage().isBlank()) {
+        if (ex.getMessage() != null && !ex.getMessage().isBlank()) {
             message = ex.getMessage();
+        } else if (ex.getCurrentStatus() != null && ex.getTargetStatus() != null) {
+            message = String.format("Invalid ride status transition: Cannot transition ride from %s to %s", ex.getCurrentStatus(), ex.getTargetStatus());
         } else {
-            message = "Cannot transition ride to the requested status";
+            message = "Invalid ride status transition";
         }
 
         ErrorResponse errorResponse = ErrorResponse.builder()

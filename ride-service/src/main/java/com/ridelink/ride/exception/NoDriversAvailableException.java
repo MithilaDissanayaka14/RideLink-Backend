@@ -7,6 +7,6 @@ public class NoDriversAvailableException extends RuntimeException {
     }
 
     public NoDriversAvailableException() {
-        super("No available eligible drivers found in your pickup area. Please try again later.");
+        super("No eligible drivers available in this area");
     }
 }

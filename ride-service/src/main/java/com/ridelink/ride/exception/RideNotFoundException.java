@@ -1,6 +1,6 @@
 package com.ridelink.ride.exception;
 
-public class RideNotFoundException extends RuntimeException {
+public class RideNotFoundException extends ResourceNotFoundException {
 
     public RideNotFoundException(String message) {
         super(message);

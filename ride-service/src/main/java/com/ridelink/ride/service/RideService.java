@@ -75,7 +75,7 @@ public class RideService {
         // 3. Negative scenario check: If no drivers are available, throw NoDriversAvailableException
         if (availableDrivers == null || availableDrivers.isEmpty()) {
             log.warn("No available drivers found in pickup area for passenger: {}", request.getPassengerId());
-            throw new NoDriversAvailableException("No available eligible drivers found in your pickup area. Please try again later.");
+            throw new NoDriversAvailableException("No eligible drivers available in this area");
         }
 
         // 4. Save ride in MongoDB with status REQUESTED

@@ -33,6 +33,10 @@ public class ErrorResponse {
     @Schema(description = "Field-level validation error details, if applicable")
     private Map<String, String> errors;
 
+    @Schema(description = "Additional error details or field mappings, if applicable")
+    private Map<String, String> details;
+
+
     @Builder.Default
     @Schema(description = "Timestamp when the error occurred")
     private Instant timestamp = Instant.now();

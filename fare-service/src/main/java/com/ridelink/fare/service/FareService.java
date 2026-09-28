@@ -36,16 +36,22 @@ public class FareService {
     @Value("${fare.minimum-fare:250.0}")
     private double minimumFare = 250.0;
 
-    public FareService(PaymentRepository paymentRepository) {
-        this.paymentRepository = paymentRepository;
-    }
-
-    public FareService(PaymentRepository paymentRepository, double baseRate, double perKmRate, double minimumFare) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public FareService(
+            PaymentRepository paymentRepository,
+            @Value("${fare.base-rate:150.0}") double baseRate,
+            @Value("${fare.per-km-rate:80.0}") double perKmRate,
+            @Value("${fare.minimum-fare:250.0}") double minimumFare) {
         this.paymentRepository = paymentRepository;
         this.baseRate = baseRate;
         this.perKmRate = perKmRate;
         this.minimumFare = minimumFare;
     }
+
+    public FareService(PaymentRepository paymentRepository) {
+        this(paymentRepository, 150.0, 80.0, 250.0);
+    }
+
 
     /**
      * Calculate fare using documented formula:

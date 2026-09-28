@@ -17,10 +17,12 @@ import java.net.InetSocketAddress;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
+import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
 
 @SpringBootApplication(scanBasePackages = {"com.ridelink.ride", "ride_service"})
 @EnableMongoRepositories(basePackages = {"com.ridelink.ride", "ride_service"})
+@EnableFeignClients(basePackages = {"com.ridelink.ride.client", "ride_service.client"})
 public class RideServiceApplication {
 
 	private static MongoServer inMemoryMongoServer;

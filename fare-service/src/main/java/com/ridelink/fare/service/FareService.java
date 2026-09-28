@@ -103,8 +103,9 @@ public class FareService {
         String receiptNumber = "REC-" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase();
 
         if (Boolean.TRUE.equals(request.getSimulateFailure())) {
-            String failureReason = "Payment simulation failed: Simulated rejection triggered for rideId: " + request.getRideId();
+            String failureReason = "Simulated payment failed: Card declined or insufficient funds";
             log.warn("Simulated payment failure triggered for rideId: {}", request.getRideId());
+
 
             Payment failedPayment = Payment.builder()
                     .rideId(request.getRideId())

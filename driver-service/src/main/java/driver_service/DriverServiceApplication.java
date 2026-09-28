@@ -10,6 +10,8 @@ import io.github.cdimascio.dotenv.Dotenv;
 import org.bson.Document;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.openfeign.EnableFeignClients;
+
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
 
 import java.io.File;
@@ -20,7 +22,9 @@ import java.util.concurrent.TimeUnit;
 
 @SpringBootApplication(scanBasePackages = {"com.ridelink.driver", "driver_service"})
 @EnableMongoRepositories(basePackages = {"com.ridelink.driver", "driver_service"})
+@EnableFeignClients(basePackages = {"com.ridelink.driver.client", "driver_service.client"})
 public class DriverServiceApplication {
+
 
 	private static MongoServer inMemoryMongoServer;
 

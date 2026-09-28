@@ -2,6 +2,7 @@ package account_service.service;
 
 import account_service.dto.UpdateProfileRequest;
 import account_service.dto.UserResponse;
+import account_service.exception.AccountSuspendedException;
 import account_service.exception.UserNotFoundException;
 import account_service.model.User;
 import account_service.model.UserStatus;
@@ -21,12 +22,20 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found with id: " + userId));
 
+        if (user.getStatus() == UserStatus.SUSPENDED || user.getStatus() == UserStatus.DEACTIVATED) {
+            throw new AccountSuspendedException("Account is inactive or suspended");
+        }
+
         return mapToUserResponse(user);
     }
 
     public UserResponse updateUserProfile(String userId, UpdateProfileRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("User not found with id: " + userId));
+
+        if (user.getStatus() == UserStatus.SUSPENDED || user.getStatus() == UserStatus.DEACTIVATED) {
+            throw new AccountSuspendedException("Account is inactive or suspended");
+        }
 
         user.setFullName(request.getFullName().trim());
         user.setPhoneNumber(request.getPhoneNumber().trim());

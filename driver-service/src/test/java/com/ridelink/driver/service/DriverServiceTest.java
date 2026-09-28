@@ -1,8 +1,11 @@
 package com.ridelink.driver.service;
 
+import com.ridelink.driver.client.AccountServiceClient;
+
 import com.ridelink.driver.dto.CreateDriverRequest;
 import com.ridelink.driver.dto.DriverResponse;
 import com.ridelink.driver.dto.UpdateLocationRequest;
+import com.ridelink.driver.dto.UserResponse;
 import com.ridelink.driver.dto.VehicleDto;
 import com.ridelink.driver.exception.ResourceNotFoundException;
 import com.ridelink.driver.model.Driver;
@@ -35,6 +38,9 @@ class DriverServiceTest {
     @Mock
     private DriverRepository driverRepository;
 
+    @Mock
+    private AccountServiceClient accountServiceClient;
+
     @InjectMocks
     private DriverService driverService;
 
@@ -42,6 +48,7 @@ class DriverServiceTest {
     private Driver sampleDriver;
     private Location sampleLocation;
     private Vehicle sampleVehicle;
+    private UserResponse validDriverUser;
 
     @BeforeEach
     void setUp() {
@@ -58,6 +65,12 @@ class DriverServiceTest {
                 .phoneNumber("+94771234567")
                 .licenseNumber("B1234567")
                 .vehicle(vehicleDto)
+                .build();
+
+        validDriverUser = UserResponse.builder()
+                .id("user-101")
+                .email("john.driver@example.com")
+                .role("DRIVER")
                 .build();
 
         sampleVehicle = Vehicle.builder()
@@ -93,6 +106,7 @@ class DriverServiceTest {
     @Test
     @DisplayName("Success Test: Registering a driver profile with valid details sets status to OFFLINE")
     void registerDriver_Success_WithValidDetails() {
+        when(accountServiceClient.getUserById("user-101")).thenReturn(validDriverUser);
         when(driverRepository.findByUserId("user-101")).thenReturn(Optional.empty());
         when(driverRepository.save(any(Driver.class))).thenAnswer(invocation -> {
             Driver driverArg = invocation.getArgument(0);
@@ -116,13 +130,50 @@ class DriverServiceTest {
         assertEquals("CAB-1234", response.getVehicle().getVehicleNumber());
         assertEquals(VehicleType.CAR, response.getVehicle().getVehicleType());
 
+        verify(accountServiceClient, times(1)).getUserById("user-101");
         verify(driverRepository, times(1)).findByUserId("user-101");
         verify(driverRepository, times(1)).save(any(Driver.class));
     }
 
     @Test
+    @DisplayName("Negative Test: Attempting to register a driver with non-DRIVER role throws IllegalArgumentException")
+    void registerDriver_ThrowsIllegalArgumentException_WhenUserNotDriverRole() {
+        UserResponse passengerUser = UserResponse.builder()
+                .id("user-101")
+                .email("passenger@example.com")
+                .role("PASSENGER")
+                .build();
+        when(accountServiceClient.getUserById("user-101")).thenReturn(passengerUser);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                driverService.registerDriver(createDriverRequest)
+        );
+
+        assertEquals("Only users registered as DRIVER can create a driver profile", exception.getMessage());
+        verify(accountServiceClient, times(1)).getUserById("user-101");
+        verify(driverRepository, never()).findByUserId(anyString());
+        verify(driverRepository, never()).save(any(Driver.class));
+    }
+
+    @Test
+    @DisplayName("Negative Test: Attempting to register a driver when user not found in account-service throws IllegalArgumentException")
+    void registerDriver_ThrowsIllegalArgumentException_WhenUserNotFoundInAccountService() {
+        when(accountServiceClient.getUserById("user-101")).thenReturn(null);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                driverService.registerDriver(createDriverRequest)
+        );
+
+        assertEquals("Only users registered as DRIVER can create a driver profile", exception.getMessage());
+        verify(accountServiceClient, times(1)).getUserById("user-101");
+        verify(driverRepository, never()).findByUserId(anyString());
+        verify(driverRepository, never()).save(any(Driver.class));
+    }
+
+    @Test
     @DisplayName("Negative Test: Registering a driver with an existing userId throws IllegalArgumentException")
     void registerDriver_ThrowsIllegalArgumentException_WhenUserAlreadyExists() {
+        when(accountServiceClient.getUserById("user-101")).thenReturn(validDriverUser);
         when(driverRepository.findByUserId("user-101")).thenReturn(Optional.of(sampleDriver));
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
@@ -130,9 +181,11 @@ class DriverServiceTest {
         );
 
         assertTrue(exception.getMessage().contains("Driver profile already exists for userId: user-101"));
+        verify(accountServiceClient, times(1)).getUserById("user-101");
         verify(driverRepository, times(1)).findByUserId("user-101");
         verify(driverRepository, never()).save(any(Driver.class));
     }
+
 
     // =========================================================================
     // STATUS UPDATE TEST: Updating Driver Status
@@ -239,12 +292,14 @@ class DriverServiceTest {
         Driver availableDriver1 = Driver.builder()
                 .id("driver-1")
                 .status(DriverStatus.AVAILABLE)
+                .vehicle(sampleVehicle)
                 .currentLocation(Location.builder().serviceArea("Colombo").build())
                 .build();
 
         Driver availableDriver2 = Driver.builder()
                 .id("driver-2")
                 .status(DriverStatus.AVAILABLE)
+                .vehicle(sampleVehicle)
                 .currentLocation(Location.builder().serviceArea("Kandy").build())
                 .build();
 
@@ -257,6 +312,36 @@ class DriverServiceTest {
         assertEquals(2, emptyAreaResult.size());
 
         verify(driverRepository, times(2)).findByStatus(DriverStatus.AVAILABLE);
+    }
+
+    @Test
+    @DisplayName("Retrieval Test: Filters out drivers without registered vehicle details")
+    void getAvailableDrivers_FiltersOutDriversWithoutVehicles() {
+        Driver availableWithVehicle = Driver.builder()
+                .id("driver-1")
+                .status(DriverStatus.AVAILABLE)
+                .vehicle(sampleVehicle)
+                .build();
+
+        Driver availableNoVehicle = Driver.builder()
+                .id("driver-2")
+                .status(DriverStatus.AVAILABLE)
+                .vehicle(null)
+                .build();
+
+        Driver availableEmptyPlate = Driver.builder()
+                .id("driver-3")
+                .status(DriverStatus.AVAILABLE)
+                .vehicle(Vehicle.builder().vehicleNumber("").build())
+                .build();
+
+        when(driverRepository.findByStatus(DriverStatus.AVAILABLE))
+                .thenReturn(List.of(availableWithVehicle, availableNoVehicle, availableEmptyPlate));
+
+        List<DriverResponse> result = driverService.getAvailableDrivers(null);
+
+        assertEquals(1, result.size());
+        assertEquals("driver-1", result.get(0).getId());
     }
 
     @Test

@@ -114,6 +114,35 @@ public class RideController {
         return ResponseEntity.ok(updatedRide);
     }
 
+    @PatchMapping("/{id}/assign")
+    @Operation(
+            summary = "Assign an available driver to a ride",
+            description = "Assigns an available driver to a ride with status REQUESTED, transitioning the lifecycle state to ASSIGNED."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Driver successfully assigned to ride",
+                    content = @Content(schema = @Schema(implementation = RideResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid lifecycle state transition or missing driver"
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Ride not found with the specified ID"
+            )
+    })
+    public ResponseEntity<RideResponse> assignDriver(
+            @Parameter(description = "MongoDB ObjectId of the ride", example = "64f1a2b3c4d5e6f7a8b9c0d1", required = true)
+            @PathVariable("id") String id,
+            @RequestBody UpdateRideStatusRequest request
+    ) {
+        RideResponse assignedRide = rideService.assignDriver(id, request.getDriverId());
+        return ResponseEntity.ok(assignedRide);
+    }
+
     @GetMapping("/passenger/{passengerId}")
     @Operation(
             summary = "List rides by passenger",

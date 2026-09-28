@@ -110,7 +110,9 @@ public class DriverController {
             @Parameter(description = "Optional longitude coordinate (for inter-service geosearch)", required = false)
             @RequestParam(name = "lng", required = false) Double lng) {
         log.info("REST request to get available drivers - serviceArea: '{}', lat: {}, lng: {}", serviceArea, lat, lng);
-        List<DriverResponse> availableDrivers = driverService.getAvailableDrivers(serviceArea);
+        List<DriverResponse> availableDrivers = (lat != null && lng != null)
+                ? driverService.getAvailableDrivers(serviceArea, lat, lng)
+                : driverService.getAvailableDrivers(serviceArea);
         return ResponseEntity.ok(availableDrivers);
     }
 }

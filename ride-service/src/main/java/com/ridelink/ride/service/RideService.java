@@ -1,5 +1,6 @@
 package com.ridelink.ride.service;
 
+import com.ridelink.ride.client.AccountServiceClient;
 import com.ridelink.ride.client.DriverServiceClient;
 import com.ridelink.ride.client.FareServiceClient;
 import com.ridelink.ride.dto.CreateRideRequest;
@@ -8,9 +9,11 @@ import com.ridelink.ride.dto.FareEstimateRequest;
 import com.ridelink.ride.dto.FareEstimateResponse;
 import com.ridelink.ride.dto.RideResponse;
 import com.ridelink.ride.dto.UpdateRideStatusRequest;
+import com.ridelink.ride.dto.UserResponse;
 import com.ridelink.ride.exception.InvalidStatusTransitionException;
 import com.ridelink.ride.exception.NoDriversAvailableException;
 import com.ridelink.ride.exception.RideNotFoundException;
+import com.ridelink.ride.model.Location;
 import com.ridelink.ride.model.Ride;
 import com.ridelink.ride.model.RideStatus;
 import com.ridelink.ride.repository.RideRepository;
@@ -30,18 +33,42 @@ public class RideService {
     private final RideRepository rideRepository;
     private final FareServiceClient fareServiceClient;
     private final DriverServiceClient driverServiceClient;
+    private final AccountServiceClient accountServiceClient;
 
     /**
      * Request a new ride:
-     * 1. Call FareServiceClient to fetch estimated fare synchronously.
-     * 2. Query DriverServiceClient to check for eligible available drivers.
-     * 3. If no drivers are available, throw NoDriversAvailableException.
-     * 4. Save ride in MongoDB with status REQUESTED.
+     * 1. Validate passengerId exists and has role PASSENGER via AccountServiceClient.
+     * 2. Validate pickup and destination coordinates and distance.
+     * 3. Call FareServiceClient to fetch estimated fare synchronously.
+     * 4. Query DriverServiceClient to check for eligible available drivers.
+     * 5. If no drivers are available, throw NoDriversAvailableException.
+     * 6. Save ride in MongoDB with status REQUESTED.
      */
     public RideResponse createRide(CreateRideRequest request) {
         log.info("Processing ride creation request for passengerId: {}", request.getPassengerId());
 
-        // 1. Synchronously fetch estimated fare from FareServiceClient
+        // 1. Verify passenger exists and role equals PASSENGER
+        UserResponse passenger;
+        try {
+            passenger = accountServiceClient.getUserById(request.getPassengerId());
+        } catch (Exception ex) {
+            log.warn("AccountServiceClient call failed for passengerId {}: {}", request.getPassengerId(), ex.getMessage());
+            passenger = null;
+        }
+
+        if (passenger == null || passenger.getRole() == null || !passenger.getRole().equalsIgnoreCase("PASSENGER")) {
+            log.error("User with ID {} is not registered as PASSENGER", request.getPassengerId());
+            throw new IllegalArgumentException("Only users registered as PASSENGER can request a ride");
+        }
+
+        // 2. Validate pickup and destination coordinates and distance
+        if (request.getDistanceKm() == null || request.getDistanceKm() <= 0) {
+            throw new IllegalArgumentException("Distance must be greater than zero");
+        }
+        validateCoordinates(request.getPickupLocation(), "Pickup");
+        validateCoordinates(request.getDestinationLocation(), "Destination");
+
+        // 3. Synchronously fetch estimated fare from FareServiceClient
         Double estimatedFare = null;
         try {
             FareEstimateRequest fareRequest = FareEstimateRequest.builder()
@@ -61,7 +88,7 @@ public class RideService {
             estimatedFare = Math.round((3.0 + (request.getDistanceKm() * 1.5)) * 100.0) / 100.0;
         }
 
-        // 2. Query DriverServiceClient for available eligible drivers near pickup location
+        // 4. Query DriverServiceClient for available eligible drivers near pickup location
         List<DriverDto> availableDrivers = null;
         try {
             Double lat = request.getPickupLocation() != null ? request.getPickupLocation().getLatitude() : null;
@@ -72,13 +99,13 @@ public class RideService {
             log.warn("DriverServiceClient call encountered an issue: {}", ex.getMessage());
         }
 
-        // 3. Negative scenario check: If no drivers are available, throw NoDriversAvailableException
+        // 5. Negative scenario check: If no drivers are available, throw NoDriversAvailableException
         if (availableDrivers == null || availableDrivers.isEmpty()) {
             log.warn("No available drivers found in pickup area for passenger: {}", request.getPassengerId());
             throw new NoDriversAvailableException("No eligible drivers available in this area");
         }
 
-        // 4. Save ride in MongoDB with status REQUESTED
+        // 6. Save ride in MongoDB with status REQUESTED
         Ride ride = Ride.builder()
                 .passengerId(request.getPassengerId())
                 .pickupLocation(request.getPickupLocation())
@@ -94,6 +121,18 @@ public class RideService {
         log.info("Ride successfully created with ID: {} and status: {}", savedRide.getId(), savedRide.getStatus());
 
         return RideResponse.fromEntity(savedRide);
+    }
+
+    private void validateCoordinates(Location location, String type) {
+        if (location == null || location.getLatitude() == null || location.getLongitude() == null) {
+            throw new IllegalArgumentException(type + " coordinates cannot be null");
+        }
+        if (location.getLatitude() < -90.0 || location.getLatitude() > 90.0) {
+            throw new IllegalArgumentException(type + " latitude must be between -90 and 90");
+        }
+        if (location.getLongitude() < -180.0 || location.getLongitude() > 180.0) {
+            throw new IllegalArgumentException(type + " longitude must be between -180 and 180");
+        }
     }
 
     /**
@@ -123,11 +162,12 @@ public class RideService {
 
     /**
      * Strictly enforce lifecycle transition rules:
-     * - ASSIGNED -> ACCEPTED
-     * - ACCEPTED -> IN_PROGRESS
+     * - REQUESTED -> ASSIGNED or CANCELLED
+     * - ASSIGNED -> ACCEPTED or CANCELLED
+     * - ACCEPTED -> IN_PROGRESS or CANCELLED
      * - IN_PROGRESS -> COMPLETED
-     * - Any state prior to COMPLETED -> CANCELLED
-     * Throw InvalidStatusTransitionException if an invalid state jump is attempted.
+     * - COMPLETED / CANCELLED -> Terminal states (no further transitions allowed)
+     * Throw InvalidStatusTransitionException if an illegal state transition is attempted.
      */
     public RideResponse updateRideStatus(String rideId, UpdateRideStatusRequest request) {
         log.info("Updating status of ride {} to {}", rideId, request.getStatus());
@@ -144,25 +184,24 @@ public class RideService {
 
         boolean isValidTransition = false;
 
-        switch (targetStatus) {
-            case ACCEPTED:
-                isValidTransition = (currentStatus == RideStatus.ASSIGNED);
-                break;
-            case IN_PROGRESS:
-                isValidTransition = (currentStatus == RideStatus.ACCEPTED);
-                break;
-            case COMPLETED:
-                isValidTransition = (currentStatus == RideStatus.IN_PROGRESS);
-                break;
-            case CANCELLED:
-                // Any state prior to COMPLETED can transition to CANCELLED
-                isValidTransition = (currentStatus != RideStatus.COMPLETED && currentStatus != RideStatus.CANCELLED);
+        switch (currentStatus) {
+            case REQUESTED:
+                isValidTransition = (targetStatus == RideStatus.ASSIGNED || targetStatus == RideStatus.CANCELLED);
                 break;
             case ASSIGNED:
-                isValidTransition = (currentStatus == RideStatus.REQUESTED);
+                isValidTransition = (targetStatus == RideStatus.ACCEPTED || targetStatus == RideStatus.CANCELLED);
                 break;
+            case ACCEPTED:
+                isValidTransition = (targetStatus == RideStatus.IN_PROGRESS || targetStatus == RideStatus.CANCELLED);
+                break;
+            case IN_PROGRESS:
+                isValidTransition = (targetStatus == RideStatus.COMPLETED);
+                break;
+            case COMPLETED:
+            case CANCELLED:
             default:
                 isValidTransition = false;
+                break;
         }
 
         if (!isValidTransition) {

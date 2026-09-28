@@ -85,14 +85,17 @@ public class UserController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
-    public ResponseEntity<ApiResponse<UserResponse>> getUserById(
+    public ResponseEntity<UserResponse> getUserById(
             @Parameter(description = "MongoDB ObjectId of the user", example = "64f1a2b3c4d5e6f7a8b9c0d1", required = true)
             @PathVariable String id,
             Authentication authentication) {
-        validateUserAccess(id, authentication);
+        if (authentication != null && authentication.isAuthenticated() && !"anonymousUser".equals(authentication.getPrincipal())) {
+            validateUserAccess(id, authentication);
+        }
         UserResponse response = userService.getUserProfile(id);
-        return ResponseEntity.ok(ApiResponse.success("User profile retrieved successfully", response));
+        return ResponseEntity.ok(response);
     }
+
 
     @PutMapping("/profile")
     @Operation(summary = "Update current user profile", description = "Updates full name and phone number for the currently authenticated caller.")

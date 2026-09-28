@@ -17,7 +17,10 @@ import java.net.InetSocketAddress;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
-@SpringBootApplication
+import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
+
+@SpringBootApplication(scanBasePackages = {"com.ridelink.ride", "ride_service"})
+@EnableMongoRepositories(basePackages = {"com.ridelink.ride", "ride_service"})
 public class RideServiceApplication {
 
 	private static MongoServer inMemoryMongoServer;
